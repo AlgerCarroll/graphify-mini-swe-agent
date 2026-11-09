@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "main"]
+  pull_request:
+    branches: ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "main"]
+  workflow_dispatch:
+
+
+jobs:
+  skillgen-check:
+    name: Skill generation consistency
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --python "3.12"
+
+      - name: Check generated skill artifacts
+        run: uv run --frozen --no-sync python -m tools.skillgen --check
+
+      - name: Audit per-host skill coverage
+        run: uv run --frozen --no-sync python -m tools.skillgen --audit-coverage
+
+      - name: Check file_type schema singleton
+        run: uv run --frozen --no-sync python -m tools.skillgen --schema-singleton
+
+      - name: Check monolith roundtrip
+        run: uv run --frozen --no-sync python -m tools.skillgen --monolith-roundtrip
+
+      - name: Check always-on roundtrip
+        run: uv run --frozen --no-sync python -m tools.skillgen --always-on-roundtrip
+
+  test:
+    name: Test Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+
+      - name: Install all dependencies from uv.lock
+        run: uv sync --all-extras --frozen --python "${{ matrix.python-version }}"
+
+      - name: Run test suite
+        run: uv run --frozen --no-sync pytest
+
+      - name: Verify CLI help
+        run: uv run --frozen --no-sync graphify --help
+
+      - name: Verify project installation
+        run: uv run --frozen --no-sync graphify install --project
+
+  security-scan:
+    name: Advisory security scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+
+      - name: Install default and development dependencies from uv.lock
+        run: uv sync --frozen --dev --python "3.12"
+
+      - name: Run Bandit static scan (advisory)
+        continue-on-error: true
+        run: uv run --frozen --no-sync bandit -r graphify -ll
+
+      - name: Run pip-audit dependency scan (advisory)
+        continue-on-error: true
+        run: uv run --frozen --no-sync pip-audit
